@@ -1,70 +1,113 @@
-from importlib.metadata import files
-from lzma import FILTER_LZMA2
-from msilib.schema import File
-import select
-from textwrap import fill
+# coding=windows-1251
+
 from tkinter import *
 import tkinter.ttk as ttk
+from tkinter.filedialog import askdirectory
 
-files_list = (
-    "f1",
-    "f2",
-    "d/f3",
-    "d/f4"
-)
+import os
+import shutil
+
+local_path = os.path.join(os.getcwd(), "tmp")
 
 def Change_file_info():
     print("Poop")
 
-def print_files():
-    for f in files_list:
-        if "/" in f:
-            pos = f.find("/")
-            f_dir = f[:pos]
-            if not f_dir in tree.get_children(""):
-                tree.insert("", END, id=f_dir, text=f_dir)
-            tree.insert(f_dir, END, id=f[pos+1:], text=f[pos+1:])
+def load_files():
+    # Выбор директории для скачивания
+    folder = askdirectory(title="Папка для загрузки", initialdir="/")
+    if folder == "":
+        return
+
+    # Копирование файлов в локальную диркторию
+    if os.path.exists(local_path):
+        shutil.rmtree(local_path)
+    
+    shutil.copytree(folder, local_path)
+
+    # Вывод файлов в дерево
+    insert_files(local_path, "")
+
+def insert_files(path, parrent):
+    for el in os.listdir(path):
+        if os.path.isdir(os.path.join(path, el)):
+            tree.insert(parrent, END, id=os.path.join(path,el), text=el, open=True, tag="FOLDER")
+            insert_files(os.path.join(path,el), os.path.join(path,el))
         else:
-            tree.insert("", END, id=f, text=f)
+            tree.insert(parrent, END, id=os.path.join(path,el), text=el, tag="FILE")
+            tree.set(os.path.join(path,el), column="#1", value="Скачан")
 
-main_window = Tk()
+if __name__=="__main__":
+    main_window = Tk()
+    
+    # Настройка окна
+    main_window.title("Редактор тэгов файлов mp3")
+    main_window.geometry("1600x780+200+100")
+    main_window.iconbitmap(default="foldermusic.ico")
+    main_window.attributes("-toolwindow", True)
 
-# Настройка окна
-main_window.title("Edit music files")
+    # Создание стилей
+    style = ttk.Style(main_window)
+    style.configure('Files.Treeview.Heading', 
+                    background="lightpink1",
+                    activebackground="lightpink1")
+    style.configure('Files.TFrame', background="antiquewhite")
+    style.configure('Files.TCheckbutton', background="antiquewhite")
 
-#Выбор и вывод файлов
-files_frame = Frame(width=20, height=40)
+    # Создание меню
+    main_menu = Menu(main_window)
 
-select_files_var = BooleanVar()
-select_files = ttk.Checkbutton(files_frame, 
-                               text="Select several", 
-                               var=select_files_var)
+    file_menu = Menu(main_menu)
+    file_menu.add_command(label="Загрузить в систему", command=load_files)
+    file_menu.add_command(label="Выгрузить")
 
-tree = ttk.Treeview(files_frame, 
-                    show="tree", 
-                    columns=("#1"))
-tree.heading("#1", text="File name")
+    main_menu.add_cascade(label="Файл", menu=file_menu)
+    main_window.config(menu=main_menu)
 
-select_files.pack(expand=True, fill='x')
-tree.pack(expand=True, fill='both')
+    # Выбор и вывод файлов
+    files_frame = ttk.Frame(
+        borderwidth=2,
+        relief=RAISED,
+        padding=[2, 3],
+        style="Files.TFrame")
 
-#Вывод информации о файле
-info_frame = Frame(width=60, height=20)
+    select_files_var = BooleanVar()
+    select_files = ttk.Checkbutton(files_frame,
+        text="Выбрать несколько", 
+        var=select_files_var,
+        style="Files.TCheckbutton")
 
-info = Label(info_frame, text="Here wil be info about file")
-change = Button(info_frame, 
-                text="Change params", 
-                state="disabled", 
-                command=Change_file_info,
-                height=4)
+    tree = ttk.Treeview(files_frame, 
+        show="tree headings", 
+        columns=("#1"),
+        selectmode="browse",
+        style="Files.Treeview")
 
-info.pack(expand=True, fill='both')
-change.pack(fill='x', side='bottom')
+    tree.heading("#0", text="Имя файлов")
+    tree.heading("#1", text="Статус")
+    tree.column("#0", width=300)
+    tree.column("#1", width=90)
 
-#Расположение frame
-files_frame.pack(side="left", expand=True, fill='y')
-info_frame.pack(expand=True, fill='both')
+    tree.tag_configure("FOLDER", background="lightpink1")
+    tree.tag_configure("FILE", background="beige")
 
-main_window.mainloop()
+    select_files.pack(anchor="center", pady=4)
+    tree.pack(expand=True, fill='both', padx=2, pady=1)
 
-print_files
+    # Вывод информации о файле
+    info_frame = Frame()
+
+    info = Label(info_frame, text="Здесь будет информаця о файле", width=60)
+    change = Button(info_frame, 
+        text="Сохранить изменения", 
+        state="disabled", 
+        command=Change_file_info,
+        height=4)
+
+    info.pack(expand=True, fill='both')
+    change.pack(fill='x', side='bottom')
+
+    # Расположение frame
+    files_frame.pack(side="left", fill='y', padx=3, pady=4)
+    info_frame.pack(expand=True, fill='both')
+
+    main_window.mainloop()
