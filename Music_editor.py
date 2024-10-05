@@ -3,15 +3,18 @@
 from ssl import ALERT_DESCRIPTION_BAD_CERTIFICATE
 from tkinter import *
 import tkinter.ttk as ttk
-from tkinter.filedialog import askdirectory
+from tkinter.filedialog import askdirectory, askopenfilename
 
 import os
 import shutil
+from PIL.ImageFile import LOAD_TRUNCATED_IMAGES
 import eyed3
 import io
 from PIL import ImageTk, Image
-from mutagen.id3 import ID3
+import time
+import pygame
 
+# Загрузка файлов в локальную директорию
 def load_files():
 
     # Выбор директории для скачивания
@@ -31,6 +34,7 @@ def load_files():
     tree.insert("", END, id=local_path, text=os.path.basename(folder), open=True, tag="FOLDER")
     insert_files(local_path, local_path)
 
+# Вставка имен файлов в дерево
 def insert_files(path, parrent):
     for el in os.listdir(path):
         if os.path.isdir(os.path.join(path, el)):
@@ -40,6 +44,7 @@ def insert_files(path, parrent):
             tree.insert(parrent, END, id=os.path.join(path,el), text=el, tag="FILE")
             tree.set(os.path.join(path,el), column="#1", value="Скачан")
 
+# Обработка нажатия Treeview
 open_change_var = False
 def Open_chage(event):
     global open_change_var
@@ -85,19 +90,31 @@ def Select_file(event):
     if tree_select.get_children("") == ():
         Clear(False)
 
+# Разблокировка окон и вывод информации
 def Unlock_file_info(is_select_file, filename):
+    global ALBUM_IMAGE
+    global MUSIC_LENGTH
+    global UPDATER
+    global FILE_NAME
 
     artist_unknown.configure(state="normal")
     album_unknown.configure(state="normal")
     artwork_unknown.configure(state="normal")
+
+    artwork_load.configure(state="normal")
+    artwork_return.configure(state="normal")
 
     artist_text.configure(state="normal")
     album_text.configure(state="normal")
     change.configure(state="normal")
 
     if is_select_file:
+        FILE_NAME = filename
         name_label.configure(text="Имя файла: " + os.path.basename(filename))
         title_text.configure(state="normal")
+
+        progress_scale.configure(state="normal")
+        play_button.configure(state="normal")
 
         audio = eyed3.load(filename)
         if audio.tag.title == None:
@@ -111,12 +128,34 @@ def Unlock_file_info(is_select_file, filename):
         artist_text.insert(END, audio.tag.artist)
         album_text.insert(END, audio.tag.album)
 
-        print(audio.tag.images)
-        if audio.tag.images != ():
-            img = ImageTk.PhotoImage(Image.open(io.BytesIO(audio.tag.images[0].image_data)))
-            Label(main_window, image=img).pack()
+        if list(audio.tag.images) != []:
+            img = Image.open(io.BytesIO(audio.tag.images[0].image_data))
+            img = img.resize((400, 400))
+            ALBUM_IMAGE = ImageTk.PhotoImage(img)
+            artwork_canvas.create_image(0, 0, anchor="nw", image=ALBUM_IMAGE)
 
+        # Добавление аудио в звуковую дорожку
+        MUSIC_LENGTH = audio.info.time_secs
+        music_duration_label.configure(text=Duration_from_sec(MUSIC_LENGTH))
+        progress_scale.configure(to=MUSIC_LENGTH)
+        play_button.configure(image=play_icon)
+
+        pygame.mixer.music.load(filename)
+        pygame.mixer.music.play()
+        pygame.mixer.music.pause()
+
+# Очистка и блокировка окон
 def Clear(flag):
+    global PAUSE_BUTTON_STATE
+    global LOAD_IMAGE
+    global ALBUM_IMAGE
+
+    PAUSE_BUTTON_STATE = True
+    LOAD_IMAGE = None
+    ALBUM_IMAGE = None
+
+    main_window.after_cancel(UPDATER)
+
     if flag:
         for el in tree.get_children(""):
             tree.delete(el)
@@ -137,11 +176,22 @@ def Clear(flag):
     artist_text.configure(state="disabled")
     album_text.configure(state="disabled")
 
+    artwork_canvas.delete("all")
+    artwork_load.configure(state="disabled")
+    artwork_return.configure(state="disabled")
+
+    progress_scale.configure(value=0)
+    time_elapsed_label.configure(text="00:00")
+
+    progress_scale.configure(state="disabled")
+    play_button.configure(state="disabled")
+
     artist_unknown.configure(state="disabled")
     album_unknown.configure(state="disabled")
     artwork_unknown.configure(state="disabled")
     change.configure(state="disabled")
 
+# Рекурсивный выбор всех детей
 def Select_children(parrent):
     for el in tree.get_children(parrent):
         if tree.get_children(el) != ():
@@ -152,20 +202,105 @@ def Select_children(parrent):
             else:
                 tree_select.insert("", END, id=el, text=tree.item(el,'text'), tag="FILE")
 
+# Перевод из секунд в время (string)
+def Duration_from_sec(secs):
+    m, s = divmod(secs, 60)
+    timelapsed = "{:02d}:{:02d}".format(int (m), int (s))
+
+    return timelapsed
+
+# Воспроизведение аудио
+def Play_song():
+    global PAUSE_BUTTON_STATE
+    global UPDATER
+
+    if PAUSE_BUTTON_STATE:
+        PAUSE_BUTTON_STATE = False
+        play_button.configure(image=stop_icon)
+
+        pygame.mixer.music.unpause()
+        Scale_update()
+    else:
+        main_window.after_cancel(UPDATER)
+        PAUSE_BUTTON_STATE = True
+        play_button.configure(image=play_icon)
+
+        pygame.mixer.music.pause()
+
+# Обновление полосы времени
+def Scale_update():
+    global UPDATER
+    if progress_scale['value'] < MUSIC_LENGTH:
+        progress_scale['value'] += 1
+
+        time_elapsed_label['text'] = Duration_from_sec(progress_scale.get())
+        UPDATER = main_window.after(1000, Scale_update)
+    else:
+        progress_scale['value'] = 0
+        time_elapsed_label['text'] = "00:00"
+
+# Изменение времени
+def Scale_moved(x):
+    global UPDATER
+    global PAUSE_BUTTON_STATE
+
+    main_window.after_cancel(UPDATER)
+    at = progress_scale.get()
+    pygame.mixer.music.play(0,at)
+    if PAUSE_BUTTON_STATE:
+        pygame.mixer.music.pause()
+    else:
+        Scale_update()
+
+# Загрузить обложку альбома
+def Load_artwork():
+    global LOAD_IMAGE
+
+    file_types = [("Изображение", "*.jpg"), ("Изображение", "*.jpeg"), ("Изображение", "*.png")]
+    filename = askopenfilename(filetypes=file_types)
+    
+    if filename == "":
+        return
+
+    img = Image.open(filename)
+    img = img.resize((400, 400))
+    LOAD_IMAGE = ImageTk.PhotoImage(img)
+
+    artwork_canvas.delete("all")
+    artwork_canvas.create_image(0, 0, anchor="nw", image=LOAD_IMAGE)
+
+def Return_atrwork():
+    global ALBUM_IMAGE
+    artwork_canvas.delete("all")
+
+    if ALBUM_IMAGE != None:
+        artwork_canvas.create_image(0, 0, anchor="nw", image=ALBUM_IMAGE)
+
 if __name__=="__main__":
+    pygame.init()
     main_window = Tk()
     
-    #Глобальные переменные
+    #Глобальные переменные GUI
     local_path = os.path.join(os.getcwd(), "tmp")
     select_files_var = BooleanVar()
     artist_unknown_var = BooleanVar()
     album_unknown_var = BooleanVar()
     artwork_unknown_var = BooleanVar()
+
+    play_icon = Image.open('image/play-button.png')
+    play_icon = play_icon.resize((40, 40))
+    play_icon = ImageTk.PhotoImage(play_icon)
+
+    stop_icon = Image.open('image/pause.png')
+    stop_icon = stop_icon.resize((40, 40))
+    stop_icon = ImageTk.PhotoImage(stop_icon)
+
+    UPDATER = main_window.after(0, '')
+    main_window.after_cancel(UPDATER)
     
     # Настройка окна
     main_window.title("Редактор тэгов файлов mp3")
     main_window.geometry("1600x780+200+100")
-    #main_window.iconbitmap(default="foldermusic.ico")
     main_window.config(background="oldlace")
 
     # Создание стилей
@@ -179,6 +314,7 @@ if __name__=="__main__":
     style.configure('Info.TFrame', background="mistyrose1")
     style.configure('Files.TCheckbutton', background="antiquewhite")
     style.configure('Info.TCheckbutton', background="mistyrose1", font=("Times New Roman", 14),)
+    style.configure('TScale', background="mistyrose1")
 
     # Создание меню
     menu_frame = ttk.Labelframe(main_window,
@@ -339,7 +475,14 @@ if __name__=="__main__":
     artwork_load = Button(artwork_frame, 
         text="Загрузить обложку", 
         state="disabled", 
-        command=print("pop"),
+        command=Load_artwork,
+        font=("Times New Roman", 14),
+        background="mistyrose2")
+
+    artwork_return = Button(artwork_frame, 
+        text="Вернуть обложку", 
+        state="disabled", 
+        command=Return_atrwork,
         font=("Times New Roman", 14),
         background="mistyrose2")
 
@@ -353,9 +496,47 @@ if __name__=="__main__":
         variable=artwork_unknown_var,
         style="Info.TCheckbutton")
 
-    artwork_load.pack(fill='x', padx=3, pady=4)
     artwork_canvas.pack()
     artwork_unknown.pack(padx=3, pady=4)
+    artwork_load.pack(fill='x', padx=3, pady=4)
+    artwork_return.pack(fill='x', padx=3, pady=4)
+
+    # Воспроизвести аудио
+    play_frame = ttk.Frame(info_frame,
+        padding=[0],
+        borderwidth=2,
+        style="Info.TFrame")
+
+    time_elapsed_label = Label(play_frame,
+        text="00:00",
+        padx=5,
+        background="mistyrose1")
+    music_duration_label = Label(play_frame,
+        text="00:00",
+        padx=15,
+        background="mistyrose1")
+
+    progress_scale = ttk.Scale(play_frame,
+        orient="horizontal",
+        from_=0,
+        length=380,
+        state="disable",
+        command=Scale_moved,
+        style="TScale")
+
+    play_button = Button(play_frame,
+        cursor='hand2',
+        command=Play_song,
+        borderwidth=0,
+        image=play_icon,
+        background="mistyrose1",
+        state="disable",
+        activebackground="mistyrose1")
+
+    play_button.pack(side='left', padx=3, pady=4)
+    time_elapsed_label.pack(side='left', padx=3, pady=4)
+    progress_scale.pack(side='left', padx=3, pady=4)
+    music_duration_label.pack(side='left', padx=3, pady=4)
 
     # Кнопки
     change = Button(info_frame, 
@@ -374,6 +555,7 @@ if __name__=="__main__":
     album_frame.pack(fill="x")
     album_unknown.pack(fill="x", padx=3, pady=4)
 
+    play_frame.pack(fill="x", padx=3, pady=4)
     change.pack(fill="x", padx=3, pady=4)
 
     # Расположение frame
