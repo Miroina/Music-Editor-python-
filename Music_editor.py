@@ -1,9 +1,11 @@
 # coding=windows-1251
 
+from lib2to3.refactor import get_all_fix_names
 from ssl import ALERT_DESCRIPTION_BAD_CERTIFICATE
+from sys import _current_frames
 from tkinter import *
 import tkinter.ttk as ttk
-from tkinter.filedialog import askdirectory, askopenfilename
+from tkinter.filedialog import askdirectory, askopenfilename, askopenfilenames
 
 import os
 import shutil
@@ -13,10 +15,15 @@ import io
 from PIL import ImageTk, Image
 import time
 import pygame
+from collections import namedtuple
+
+def auto_load():
+    # Вывод файлов в дерево
+    tree.insert("", END, id=local_path, text="Временная папка", open=True, tag="FOLDER")
+    insert_files(local_path, local_path)
 
 # Загрузка файлов в локальную директорию
 def load_files():
-
     # Выбор директории для скачивания
     folder = askdirectory(title="Папка для загрузки", initialdir="/")
     if folder == "":
@@ -31,8 +38,29 @@ def load_files():
     shutil.copytree(folder, local_path)
 
     # Вывод файлов в дерево
-    tree.insert("", END, id=local_path, text=os.path.basename(folder), open=True, tag="FOLDER")
+    tree.insert("", END, id=local_path, text="Временная папка", open=True, tag="FOLDER")
     insert_files(local_path, local_path)
+
+# Добавить композицию в список
+def add_files():
+    file_types = [("Музыкальный файл", "*.mp3")]
+    files = askopenfilenames(filetypes=file_types)
+
+    if files == "":
+        return
+
+    if not os.path.exists(local_path):
+        os.mkdir(local_path)
+    if not tree.exists(local_path):
+        tree.insert("", END, id=local_path, text="Временная папка", open=True, tag="FOLDER")
+
+    for f in files:
+        if tree.exists(f):
+            continue
+
+        el = os.path.basename(f)
+        tree.insert(local_path, END, id=os.path.join(local_path,el), text=el, tag="FILE")
+        tree.set(os.path.join(local_path,el), column="#1", value="Скачан")
 
 # Вставка имен файлов в дерево
 def insert_files(path, parrent):
@@ -44,6 +72,12 @@ def insert_files(path, parrent):
             tree.insert(parrent, END, id=os.path.join(path,el), text=el, tag="FILE")
             tree.set(os.path.join(path,el), column="#1", value="Скачан")
 
+# Изменение стиля выбора файлов
+def Change_select():
+    for el in tree_select.get_children(""):
+        tree_select.delete(el)
+    Clear(False)
+
 # Обработка нажатия Treeview
 open_change_var = False
 def Open_chage(event):
@@ -52,6 +86,9 @@ def Open_chage(event):
 
 def Select_file(event):
     global open_change_var
+    global FILE_NAME
+    FILE_NAME = None
+
     if open_change_var:
         open_change_var = False
         return
@@ -131,8 +168,8 @@ def Unlock_file_info(is_select_file, filename):
         if list(audio.tag.images) != []:
             img = Image.open(io.BytesIO(audio.tag.images[0].image_data))
             img = img.resize((400, 400))
-            ALBUM_IMAGE = ImageTk.PhotoImage(img)
-            artwork_canvas.create_image(0, 0, anchor="nw", image=ALBUM_IMAGE)
+            ALBUM_IMAGE = ["", ImageTk.PhotoImage(img)]
+            artwork_canvas.create_image(0, 0, anchor="nw", image=ALBUM_IMAGE[1])
 
         # Добавление аудио в звуковую дорожку
         MUSIC_LENGTH = audio.info.time_secs
@@ -155,6 +192,7 @@ def Clear(flag):
     ALBUM_IMAGE = None
 
     main_window.after_cancel(UPDATER)
+    pygame.mixer.music.unload()
 
     if flag:
         for el in tree.get_children(""):
@@ -257,31 +295,232 @@ def Load_artwork():
     global LOAD_IMAGE
 
     file_types = [("Изображение", "*.jpg"), ("Изображение", "*.jpeg"), ("Изображение", "*.png")]
-    filename = askopenfilename(filetypes=file_types)
+    filename = askopenfilename(filetypes=file_types, initialdir="/")
     
     if filename == "":
         return
 
     img = Image.open(filename)
     img = img.resize((400, 400))
-    LOAD_IMAGE = ImageTk.PhotoImage(img)
+    LOAD_IMAGE = [filename, ImageTk.PhotoImage(img)]
 
     artwork_canvas.delete("all")
-    artwork_canvas.create_image(0, 0, anchor="nw", image=LOAD_IMAGE)
+    artwork_canvas.create_image(0, 0, anchor="nw", image=LOAD_IMAGE[1])
 
+# Вернуть начальную обложку альбома
 def Return_atrwork():
     global ALBUM_IMAGE
+    global LOAD_IMAGE
     artwork_canvas.delete("all")
 
     if ALBUM_IMAGE != None:
-        artwork_canvas.create_image(0, 0, anchor="nw", image=ALBUM_IMAGE)
+        artwork_canvas.create_image(0, 0, anchor="nw", image=ALBUM_IMAGE[1])
 
-if __name__=="__main__":
+    LOAD_IMAGE = None
+
+# Сохранить изменения файла
+def Save_changes():
+    global LOAD_IMAGE
+    global ALBUM_IMAGE
+    global RESULT_FILES
+
+    res = []
+    res_file = namedtuple('res_file', 'first_name name title artist album artwork')
+
+    for f in tree_select.get_children(""):
+        audio = eyed3.load(f)
+        
+        get_title_text = title_text.get(0.0, END)[:-1]
+        get_artist_text = artist_text.get(0.0, END)[:-1]
+        get_album_text = album_text.get(0.0, END)[:-1]
+
+        if title_text['state'] == "disabled":
+            title = audio.tag.title
+        else:
+            title = get_title_text
+
+        if artist_unknown_var.get():
+            artist = "Неизвестный исполнитель"
+        elif get_artist_text == "":
+            artist = audio.tag.artist
+        else:
+            artist = get_artist_text
+
+        if album_unknown_var.get():
+            artist = "Неизвестный альбом"
+        elif get_album_text == "":
+            album = audio.tag.album
+        else:
+            album = get_album_text
+
+        if artwork_unknown_var.get():
+            artwork = None
+        elif LOAD_IMAGE != None:
+            artwork = LOAD_IMAGE
+        elif ALBUM_IMAGE != None:
+            artwork = ALBUM_IMAGE
+        elif list(audio.tag.images) != []:
+            img = Image.open(io.BytesIO(audio.tag.images[0].image_data))
+            img = img.resize((400, 400))
+            artwork = ["", ImageTk.PhotoImage(img)]
+        else:
+            artwork = None
+
+        name = artist + " - " + title + ".mp3"
+        res.append(res_file(first_name=f,
+            name=name, 
+            title=title, 
+            artist=artist,
+            album=album,
+            artwork=artwork))
+
+    RESULT_FILES = res
+    Ask_save()
+
+# Вывод информации о сохраненном файле
+def Ask_save():
+    global RESULT_FILES
+
+    second_window = Toplevel()
+
+    canvas_window = Canvas(second_window,height=500, width=1000, background="mistyrose1")
+    ask_scroll = ttk.Scrollbar(second_window, orient="horizontal", command = canvas_window.xview)
+    canvas_window["xscrollcommand"] = ask_scroll.set
+
+    ask_window = ttk.Label(canvas_window,
+        style="Info.TFrame")
+    ask_window.bind(
+        "<Configure>",
+        lambda e: canvas_window.configure(
+            scrollregion=canvas_window.bbox("all")
+        )
+    )
+
+    confirm = Button(second_window, 
+        text="Сохранить", 
+        state="normal", 
+        command=lambda: (second_window.destroy(), Confirm()),
+        height=2, width=100,
+        background="mistyrose2")
+    cancel = Button(second_window, 
+        text="Отменить", 
+        state="normal", 
+        command=lambda: second_window.destroy(),
+        height=2, width=100,
+        background="mistyrose2")
+
+    canvas_window.create_window((0,0), window=ask_window, anchor="nw")
+    canvas_window.pack(side="top", fill='both')
+    ask_scroll.pack(fill="x")
+    confirm.pack(side="left", padx=3, pady=4)
+    cancel.pack(side="left", padx=3, pady=4)
+
+    Label(ask_window, text="Имя файла: ", background="mistyrose1", borderwidth=2, font=("Times New Roman", 14),).grid(row=0, column=0)
+    Label(ask_window, text="Название: ", background="mistyrose1", borderwidth=2, font=("Times New Roman", 14),).grid(row=1, column=0)
+    Label(ask_window, text="Исполнитель: ", background="mistyrose1", borderwidth=2, font=("Times New Roman", 14),).grid(row=2, column=0)
+    Label(ask_window, text="Альбом: ", background="mistyrose1", borderwidth=2, font=("Times New Roman", 14),).grid(row=3, column=0)
+    Label(ask_window, text="Обложка: ", background="mistyrose1", borderwidth=2, font=("Times New Roman", 14),).grid(row=4, column=0)
+    
+    col = 1
+    for el in RESULT_FILES:
+        Label(ask_window, text=el.name, background="mistyrose1", font=("Times New Roman", 14),).grid(row=0, column=col)
+        Label(ask_window, text=el.title, background="mistyrose1", font=("Times New Roman", 14),).grid(row=1, column=col)
+        Label(ask_window, text=el.artist, background="mistyrose1", font=("Times New Roman", 14),).grid(row=2, column=col)
+        Label(ask_window, text=el.album, background="mistyrose1", font=("Times New Roman", 14),).grid(row=3, column=col)
+        if el.artwork == None:
+            Label(ask_window, text="Нет обложки", background="mistyrose1", borderwidth=2).grid(row=4, column=col)
+        else:
+            Label(ask_window, image=el.artwork[1], background="mistyrose1", borderwidth=2).grid(row=4, column=col)
+
+        col += 1
+
+def Confirm():
+    global RESULT_FILES
+
+    Clear(False)
+
+    # first_name name title artist album artwork
+    for f in RESULT_FILES:
+        index = tree.index(f.first_name)
+        parent = tree.parent(f.first_name)
+
+        tree.delete(f.first_name)
+        tree_select.delete(f.first_name)
+
+        path = os.path.dirname(f.first_name)
+        name = os.path.join(path, f.name)
+        os.rename(f.first_name, name)
+
+        audio = eyed3.load(name)
+
+        audio.tag.title = f.title
+        audio.tag.artist = f.artist
+        audio.tag.album = f.album
+
+        if f.artwork == None:
+            for descr in [audio_image.description for audio_image in audio.tag.images]:
+                audio.tag.images.remove(descr)
+        elif not f.artwork[0] == "":
+            for descr in [audio_image.description for audio_image in audio.tag.images]:
+                audio.tag.images.remove(descr)
+            audio.tag.images.set(3, open(f.artwork[0], 'rb').read(), 'image/jpeg')
+
+        audio.tag.save()
+
+        tree.insert(parent, index, id=name, text=f.name, tag="FILE")
+        tree.set(name, column="#1", value="Изменен")
+
+# Изменить папку
+def Change_folder():
+    if tree_select.get_children("") == ():
+        return
+
+    folder = askdirectory(title="Выберите папку", initialdir=local_path)
+    if folder == "":
+        return
+
+    Clear(False)
+
+    folder = os.path.abspath(folder)
+    Set_folder(folder)
+
+    for f in tree_select.get_children(""):
+        shutil.move(f, folder)
+
+        parrent = tree.parent(f)
+        tree.delete(f)
+        tree_select.delete(f)
+        if tree.get_children(parrent) == ():
+            tree.delete(parrent)
+
+        tree.insert(folder, END, id=os.path.join(folder, os.path.basename(f)), text=os.path.basename(f), tag="FILE")
+
+# Список папок
+def Set_folder(cur_dir):
+    if local_path == cur_dir:
+        return
+    
+    folder_split = list(os.path.split(cur_dir))
+    Set_folder(folder_split[0])
+
+    if not tree.exists(cur_dir):
+        tree.insert(folder_split[0], END, id=cur_dir, text=folder_split[1], open=True, tag="FOLDER")
+
+# Выгрузить файлы в папку
+def Upload_files():
+    folder = askdirectory(title="Папка для загрузки", initialdir="/")
+    if folder == "":
+        return
+
+    shutil.copytree(local_path, folder)
+    Clear(True)
+
+if __name__ == "__main__":
     pygame.init()
     main_window = Tk()
     
     #Глобальные переменные GUI
-    local_path = os.path.join(os.getcwd(), "tmp")
+    local_path = os.path.join(os.getcwd(), "temporary_music")
     select_files_var = BooleanVar()
     artist_unknown_var = BooleanVar()
     album_unknown_var = BooleanVar()
@@ -329,15 +568,31 @@ if __name__=="__main__":
         command=load_files,
         height=1,
         background="thistle1")
+    
+    add_btn = Button(menu_frame, 
+        text="Добавить файлы", 
+        state="normal", 
+        command= add_files,
+        height=1,
+        background="thistle1")
+
+    change_dir_btn = Button(menu_frame, 
+        text="Изменить папку", 
+        state="normal", 
+        command=Change_folder,
+        height=1,
+        background="thistle1")
 
     upload_btn = Button(menu_frame, 
         text="Выгрузить в папку", 
         state="normal", 
-        command=print("pop"),
+        command=Upload_files,
         height=1,
         background="thistle1")
 
     load_btn.pack(side="left", padx=2, pady=1)
+    add_btn.pack(side="left", padx=2, pady=1)
+    change_dir_btn.pack(side="left", padx=2, pady=1)
     upload_btn.pack(side="left", padx=2, pady=1)
 
     # Выбор и вывод файлов
@@ -350,6 +605,7 @@ if __name__=="__main__":
     select_files = ttk.Checkbutton(files_frame,
         text="Выбрать несколько", 
         variable=select_files_var,
+        command=Change_select,
         style="Files.TCheckbutton")
     
     tree = ttk.Treeview(files_frame, 
@@ -542,7 +798,7 @@ if __name__=="__main__":
     change = Button(info_frame, 
         text="Сохранить изменения", 
         state="disabled", 
-        command=print("pop"),
+        command=Save_changes,
         height=4,
         background="mistyrose2")
     
@@ -562,5 +818,7 @@ if __name__=="__main__":
     files_frame.pack(expand=True, side="left", fill='both', padx=3, pady=4)
     menu_frame.pack(fill='both', padx=3, pady=4)
     info_frame.pack(fill='both', padx=3, pady=4)
+
+    auto_load()
 
     main_window.mainloop()
